@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>公司任務管理系統 (Google Sheets 版)</title>
+    <title>奇跡旅遊 - 任務管理系統</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome 圖示 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- React 核心 -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -19,8 +22,11 @@
         //  設定區
         // ==========================================
         
-        // ⚠️ 請務必換成您 Apps Script 部署後的網址 (以 /exec 結尾)
-        const GOOGLE_SCRIPT_URL = "請將您的_WEB_APP_URL_貼在這裡";
+        // ⚠️ 請確認這是否為最新部署的網址 (如果有重新部署，網址通常不變，但版本要更新)
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyqVl_quiU17-U01yJg5kvz46SgeZ3h9ttnOS64ofG7PBkifp0ZE6OjxiLPhHLtcl2noA/exec";
+
+        // Logo 設定
+        const LOGO_SRC = "./奇跡LOGO.jpg"; 
 
         // ==========================================
 
@@ -30,21 +36,21 @@
             const [user, setUser] = useState(null); 
             const [tasks, setTasks] = useState([]);
             const [loading, setLoading] = useState(false);
-            const [refreshKey, setRefreshKey] = useState(0); // 用來觸發重新整理
+            const [refreshKey, setRefreshKey] = useState(0);
             
             // 表單狀態
             const [loginData, setLoginData] = useState({ mode: 'staff', name: '', pass: '' });
-            const [newTask, setNewTask] = useState({ title: '', assignee: '', urgency: 'normal', dueDate: '' });
+            
+            // 新增任務狀態 (加入檔案欄位)
+            const [newTask, setNewTask] = useState({ title: '', assignee: '', urgency: 'normal', dueDate: '', file: null, fileName: '', mimeType: '' });
             
             // 回報視窗狀態
             const [submittingTask, setSubmittingTask] = useState(null);
             const [submitData, setSubmitData] = useState({ note: '', link: '', file: null, fileName: '' });
             const [uploading, setUploading] = useState(false);
 
-            // --- 1. API 呼叫核心函式 ---
+            // --- API 呼叫核心 ---
             const callApi = async (action, payload = {}) => {
-                // 使用 POST 避免 URL 過長，並支援檔案傳輸 (Base64)
-                // Google Apps Script 的 doPost 支援 text/plain 格式的 JSON 字串
                 const response = await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
                     mode: 'cors', 
@@ -53,17 +59,15 @@
                 return await response.json();
             };
 
-            // --- 2. 讀取任務 (Polling 或初始化) ---
+            // --- 讀取任務 ---
             useEffect(() => {
                 if (!user) return;
                 
                 const fetchTasks = async () => {
                     setLoading(true);
                     try {
-                        // 使用 POST action='read' 
                         const res = await callApi('read');
                         if (res.status === 'success') {
-                            // 排序邏輯
                             const list = res.data;
                             list.sort((a, b) => {
                                 if (String(a.completed) !== String(b.completed)) return String(a.completed) === 'true' ? 1 : -1;
@@ -75,22 +79,18 @@
                         }
                     } catch (err) {
                         console.error("API Error", err);
-                        alert("連線失敗，請檢查 Script 網址或網路");
+                        alert("連線失敗，請檢查網路或 API 設定");
                     }
                     setLoading(false);
                 };
 
                 fetchTasks();
-            }, [user, refreshKey]); // 當使用者登入或 refreshKey 改變時重新讀取
+            }, [user, refreshKey]);
 
-            // --- 3. 動作處理 ---
+            // --- 動作處理 ---
 
             const handleLogin = (e) => {
                 e.preventDefault();
-                if (!GOOGLE_SCRIPT_URL.includes("http")) {
-                    alert("請先在程式碼中設定 GOOGLE_SCRIPT_URL！");
-                    return;
-                }
                 if (loginData.mode === 'admin') {
                     if (loginData.pass === 'admin123') setUser({ name: '管理員', role: 'admin' });
                     else alert('密碼錯誤');
@@ -100,17 +100,53 @@
                 }
             };
 
+            // 新增任務 (包含檔案處理)
             const addTask = async (e) => {
                 e.preventDefault();
                 if (!newTask.title || !newTask.assignee) return;
-                setLoading(true);
+                setLoading(true); // 這裡用 loading 當作上傳中的狀態
+                
                 await callApi('add', {
-                    ...newTask,
+                    title: newTask.title,
+                    assignee: newTask.assignee,
+                    urgency: newTask.urgency,
+                    dueDate: newTask.dueDate,
                     createdBy: user.name,
-                    id: Date.now().toString()
+                    id: Date.now().toString(),
+                    // 附件資料
+                    fileData: newTask.file,
+                    fileName: newTask.fileName,
+                    mimeType: newTask.mimeType
                 });
-                setNewTask({ title: '', assignee: '', urgency: 'normal', dueDate: '' });
-                setRefreshKey(old => old + 1); // 觸發重整
+
+                // 重置表單
+                setNewTask({ title: '', assignee: '', urgency: 'normal', dueDate: '', file: null, fileName: '', mimeType: '' });
+                // 清空 input file 的顯示
+                document.getElementById('taskFileInput').value = '';
+                
+                setRefreshKey(old => old + 1); 
+            };
+
+            // 處理「指派任務」時的檔案選擇
+            const handleNewTaskFile = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 2 * 1024 * 1024) { 
+                        alert("檔案請小於 2MB");
+                        e.target.value = ''; // 清空
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = function(evt) {
+                        setNewTask(prev => ({ 
+                            ...prev, 
+                            file: evt.target.result, 
+                            fileName: file.name,
+                            mimeType: file.type 
+                        }));
+                    };
+                    reader.readAsDataURL(file);
+                }
             };
 
             const deleteTask = async (id) => {
@@ -127,11 +163,11 @@
                 setRefreshKey(old => old + 1);
             };
 
-            // 檔案選擇處理 (轉 Base64)
-            const handleFileChange = (e) => {
+            // 處理「完工回報」時的檔案選擇
+            const handleCompletionFile = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    if (file.size > 2 * 1024 * 1024) { // 2MB 限制 (GAS 上限較嚴格)
+                    if (file.size > 2 * 1024 * 1024) { 
                         alert("檔案請小於 2MB");
                         return;
                     }
@@ -139,7 +175,7 @@
                     reader.onload = function(evt) {
                         setSubmitData(prev => ({ 
                             ...prev, 
-                            file: evt.target.result, // Base64 string
+                            file: evt.target.result, 
                             fileName: file.name,
                             mimeType: file.type 
                         }));
@@ -156,7 +192,7 @@
                     id: submittingTask.id,
                     note: submitData.note,
                     link: submitData.link,
-                    fileData: submitData.file, // Base64
+                    fileData: submitData.file,
                     fileName: submitData.fileName,
                     mimeType: submitData.mimeType
                 });
@@ -170,30 +206,33 @@
 
             if (!user) {
                 return (
-                    <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50">
                         <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border border-slate-200">
-                            <h1 className="text-2xl font-bold text-slate-700 mb-6 text-center">🏢 任務系統 (Google 版)</h1>
+                            <div className="flex justify-center mb-6">
+                                <img src={LOGO_SRC} alt="Logo" className="h-16 object-contain" onError={(e) => e.target.style.display='none'} />
+                            </div>
+                            <h1 className="text-xl font-bold text-slate-700 mb-6 text-center">奇跡旅遊 - 任務管理系統</h1>
                             
                             <div className="flex bg-slate-100 p-1 rounded-lg mb-6">
                                 <button onClick={() => setLoginData({...loginData, mode:'staff'})} 
-                                    className={`flex-1 py-2 rounded ${loginData.mode==='staff' ? 'bg-white shadow text-blue-600 font-bold' : 'text-slate-500'}`}>員工</button>
+                                    className={`flex-1 py-2 rounded transition-all ${loginData.mode==='staff' ? 'bg-white shadow text-green-600 font-bold' : 'text-slate-500'}`}>員工</button>
                                 <button onClick={() => setLoginData({...loginData, mode:'admin'})} 
-                                    className={`flex-1 py-2 rounded ${loginData.mode==='admin' ? 'bg-white shadow text-purple-600 font-bold' : 'text-slate-500'}`}>管理員</button>
+                                    className={`flex-1 py-2 rounded transition-all ${loginData.mode==='admin' ? 'bg-white shadow text-purple-600 font-bold' : 'text-slate-500'}`}>管理員</button>
                             </div>
 
                             <form onSubmit={handleLogin} className="space-y-4">
                                 {loginData.mode === 'staff' ? (
-                                    <input className="w-full p-3 border rounded focus:ring-2 ring-blue-500 outline-none" placeholder="輸入您的姓名" 
+                                    <input className="w-full p-3 border rounded focus:ring-2 ring-green-500 outline-none transition-all" placeholder="輸入您的姓名" 
                                         value={loginData.name} onChange={e=>setLoginData({...loginData, name:e.target.value})} />
                                 ) : (
-                                    <input className="w-full p-3 border rounded focus:ring-2 ring-purple-500 outline-none" type="password" placeholder="輸入密碼 (admin123)" 
+                                    <input className="w-full p-3 border rounded focus:ring-2 ring-purple-500 outline-none transition-all" type="password" placeholder="輸入密碼 (admin123)" 
                                         value={loginData.pass} onChange={e=>setLoginData({...loginData, pass:e.target.value})} />
                                 )}
-                                <button className={`w-full py-3 text-white rounded font-bold ${loginData.mode==='admin'?'bg-purple-600':'bg-blue-600'}`}>
+                                <button className={`w-full py-3 text-white rounded font-bold shadow-lg transition-transform active:scale-95 ${loginData.mode==='admin'?'bg-purple-600 hover:bg-purple-700':'bg-green-600 hover:bg-green-700'}`}>
                                     進入系統
                                 </button>
                             </form>
-                            <p className="text-xs text-center text-slate-400 mt-4">Powered by Google Sheets & GitHub Pages</p>
+                            <p className="text-xs text-center text-slate-400 mt-4">Internal System v1.1</p>
                         </div>
                     </div>
                 );
@@ -202,120 +241,168 @@
             return (
                 <div className="max-w-4xl mx-auto p-4 md:p-8">
                     {/* Header */}
-                    <div className="flex justify-between items-center bg-white p-5 rounded-xl shadow-sm mb-6 border border-slate-200">
-                        <div>
-                            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                                {user.role==='admin' ? <i className="fa-solid fa-user-shield text-purple-600"></i> : <i className="fa-solid fa-briefcase text-blue-600"></i>}
-                                {user.role==='admin' ? '管理後台' : '員工任務板'}
-                            </h2>
-                            <p className="text-sm text-slate-500">使用者：{user.name}</p>
+                    <div className="bg-white p-5 rounded-xl shadow-sm mb-6 border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="flex items-center gap-4">
+                            <img src={LOGO_SRC} alt="Logo" className="h-12 object-contain hidden md:block" onError={(e) => e.target.style.display='none'} />
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                    {user.role==='admin' ? <i className="fa-solid fa-user-shield text-purple-600"></i> : <i className="fa-solid fa-briefcase text-green-600"></i>}
+                                    {user.role==='admin' ? '管理後台' : '任務看板'}
+                                </h2>
+                                <p className="text-sm text-slate-500">
+                                    使用者：<span className="font-semibold">{user.name}</span>
+                                </p>
+                            </div>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={()=>setRefreshKey(k=>k+1)} className="text-slate-500 hover:text-blue-500 px-3 py-1 rounded border border-slate-200">
-                                <i className={`fa-solid fa-rotate-right ${loading ? 'fa-spin' : ''}`}></i>
+                            <button onClick={()=>setRefreshKey(k=>k+1)} className="text-slate-500 hover:text-green-600 px-3 py-1 rounded border border-slate-200 bg-slate-50">
+                                <i className={`fa-solid fa-rotate-right ${loading ? 'fa-spin' : ''}`}></i> 更新
                             </button>
-                            <button onClick={()=>setUser(null)} className="text-slate-400 hover:text-red-500 px-2"><i className="fa-solid fa-right-from-bracket"></i></button>
+                            <button onClick={()=>setUser(null)} className="text-slate-400 hover:text-red-500 px-3 py-1"><i className="fa-solid fa-right-from-bracket"></i> 登出</button>
                         </div>
                     </div>
 
-                    {/* Admin: 新增任務 */}
+                    {/* Admin: 新增任務 (表單) */}
                     {user.role === 'admin' && (
                         <div className="bg-white p-6 rounded-xl shadow-sm mb-6 border-l-4 border-purple-500">
-                            <h3 className="font-bold text-slate-700 mb-4"><i className="fa-solid fa-plus-circle"></i> 指派新任務</h3>
-                            <form onSubmit={addTask} className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                <input className="md:col-span-2 p-2 border rounded" placeholder="任務內容" value={newTask.title} onChange={e=>setNewTask({...newTask, title:e.target.value})} />
-                                <input className="p-2 border rounded" placeholder="指派對象" value={newTask.assignee} onChange={e=>setNewTask({...newTask, assignee:e.target.value})} />
-                                <div className="flex gap-2">
-                                    <select className="p-2 border rounded bg-white" value={newTask.urgency} onChange={e=>setNewTask({...newTask, urgency:e.target.value})}>
-                                        <option value="normal">一般</option>
-                                        <option value="high">緊急</option>
-                                        <option value="critical">最速件</option>
-                                    </select>
-                                    <button disabled={loading} className="bg-purple-600 text-white px-4 rounded hover:bg-purple-700 disabled:opacity-50">發佈</button>
+                            <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                                <i className="fa-solid fa-plus-circle text-purple-600"></i> 指派新任務
+                            </h3>
+                            <form onSubmit={addTask} className="space-y-3">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                    <input className="md:col-span-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="任務內容" value={newTask.title} onChange={e=>setNewTask({...newTask, title:e.target.value})} />
+                                    <input className="p-2 border rounded focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="指派對象" value={newTask.assignee} onChange={e=>setNewTask({...newTask, assignee:e.target.value})} />
+                                    <div className="flex gap-2">
+                                        <select className="w-full p-2 border rounded bg-white focus:outline-none focus:ring-2 focus:ring-purple-500" value={newTask.urgency} onChange={e=>setNewTask({...newTask, urgency:e.target.value})}>
+                                            <option value="normal">一般</option>
+                                            <option value="high">緊急</option>
+                                            <option value="critical">最速件</option>
+                                        </select>
+                                    </div>
                                 </div>
-                                <input type="date" className="md:col-span-4 p-2 border rounded w-full" value={newTask.dueDate} onChange={e=>setNewTask({...newTask, dueDate:e.target.value})} />
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-center">
+                                    <input type="date" className="p-2 border rounded w-full focus:outline-none focus:ring-2 focus:ring-purple-500" value={newTask.dueDate} onChange={e=>setNewTask({...newTask, dueDate:e.target.value})} />
+                                    
+                                    {/* 新增：上傳附件按鈕 */}
+                                    <div className="md:col-span-2 flex items-center border rounded px-2 bg-slate-50">
+                                        <i className="fa-solid fa-paperclip text-slate-400 mr-2"></i>
+                                        <input id="taskFileInput" type="file" className="w-full py-1 text-sm bg-transparent" onChange={handleNewTaskFile} />
+                                    </div>
+
+                                    <button disabled={loading} className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 disabled:opacity-50 transition-colors shadow flex justify-center items-center gap-2">
+                                        {loading ? <i className="fa-solid fa-spinner fa-spin"></i> : '發佈'}
+                                    </button>
+                                </div>
+                                {newTask.fileName && <div className="text-xs text-purple-600 font-bold">已選擇檔案: {newTask.fileName}</div>}
                             </form>
                         </div>
                     )}
 
                     {/* 任務列表 */}
                     <div className="space-y-3">
-                        {loading && tasks.length === 0 && <div className="text-center text-slate-400 py-4"><i className="fa-solid fa-spinner fa-spin"></i> 載入中...</div>}
+                        {loading && tasks.length === 0 && <div className="text-center text-slate-400 py-10"><i className="fa-solid fa-spinner fa-spin text-2xl mb-2"></i><br/>載入中...</div>}
                         
                         {tasks.map(task => {
                             const isCompleted = String(task.completed) === 'true';
                             return (
-                                <div key={task.id} className={`bg-white p-4 rounded-xl shadow-sm border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition ${isCompleted ? 'opacity-60 bg-slate-50' : ''}`}>
-                                    <div className="flex items-start gap-3 flex-1">
+                                <div key={task.id} className={`bg-white p-4 rounded-xl shadow-sm border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all duration-300 ${isCompleted ? 'opacity-60 bg-slate-50' : 'hover:shadow-md'}`}>
+                                    <div className="flex items-start gap-4 flex-1">
                                         <button 
                                             onClick={() => isCompleted ? revertTask(task.id) : setSubmittingTask(task)} 
                                             disabled={loading}
-                                            className={`text-2xl mt-1 ${isCompleted ? 'text-green-500' : 'text-slate-200 hover:text-blue-500'}`}>
+                                            className={`text-2xl mt-1 transition-colors ${isCompleted ? 'text-green-500' : 'text-slate-200 hover:text-green-500'}`}>
                                             <i className={`fa-regular ${isCompleted ? 'fa-circle-check' : 'fa-circle'}`}></i>
                                         </button>
                                         <div className="w-full">
-                                            <div className="flex justify-between items-start">
-                                                <h4 className={`font-bold text-lg ${isCompleted?'line-through text-slate-400':'text-slate-800'}`}>{task.title}</h4>
+                                            <div className="flex flex-wrap justify-between items-start gap-2">
+                                                <h4 className={`font-bold text-lg ${isCompleted?'line-through text-slate-400':'text-slate-800'}`}>
+                                                    {task.title}
+                                                </h4>
                                                 {/* 狀態標籤 */}
-                                                <div className="flex gap-1">
-                                                    {task.urgency==='critical' && <span className="bg-red-100 text-red-600 px-2 rounded text-xs font-bold whitespace-nowrap">最速件</span>}
-                                                    {task.urgency==='high' && <span className="bg-orange-100 text-orange-600 px-2 rounded text-xs whitespace-nowrap">緊急</span>}
+                                                <div className="flex gap-1 shrink-0">
+                                                    {task.urgency==='critical' && <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold whitespace-nowrap"><i className="fa-solid fa-fire"></i> 最速件</span>}
+                                                    {task.urgency==='high' && <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded text-xs whitespace-nowrap">緊急</span>}
                                                 </div>
                                             </div>
                                             
-                                            <div className="text-sm text-slate-500 flex flex-wrap gap-2 mt-1 items-center">
-                                                <span className="bg-slate-100 px-2 rounded"><i className="fa-solid fa-user text-xs"></i> {task.assignee}</span>
-                                                {task.dueDate && <span className="text-slate-400 text-xs"><i className="fa-regular fa-calendar"></i> {String(task.dueDate).substring(0,10)}</span>}
+                                            <div className="text-sm text-slate-500 flex flex-wrap gap-3 mt-2 items-center">
+                                                <span className="bg-slate-100 px-2 py-0.5 rounded flex items-center gap-1"><i className="fa-solid fa-user text-xs"></i> {task.assignee}</span>
+                                                {task.dueDate && <span className="text-slate-400 text-xs flex items-center gap-1"><i className="fa-regular fa-calendar"></i> {String(task.dueDate).substring(0,10)}</span>}
+                                                
+                                                {/* 顯示任務本身的附件 */}
+                                                {task.taskAttachment && (
+                                                    <a href={task.taskAttachment} target="_blank" className="text-purple-600 text-xs font-bold hover:underline flex items-center gap-1 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                                                        <i className="fa-solid fa-paperclip"></i> 下載附件
+                                                    </a>
+                                                )}
                                             </div>
 
                                             {/* 回報內容顯示 */}
                                             {isCompleted && (task.submissionNote || task.submissionLink || task.submissionFileUrl) && (
-                                                <div className="mt-2 bg-green-50 p-2 rounded text-sm text-green-800 border border-green-100">
-                                                    <div className="font-bold text-xs mb-1">完工回報:</div>
-                                                    {task.submissionNote && <div>{task.submissionNote}</div>}
-                                                    <div className="flex gap-2 mt-1">
-                                                        {task.submissionLink && <a href={task.submissionLink} target="_blank" className="text-blue-600 underline text-xs"><i className="fa-solid fa-link"></i> 連結</a>}
-                                                        {task.submissionFileUrl && <a href={task.submissionFileUrl} target="_blank" className="text-blue-600 underline text-xs"><i className="fa-solid fa-paperclip"></i> 附件</a>}
+                                                <div className="mt-3 bg-green-50 p-3 rounded-lg text-sm text-green-800 border border-green-100 relative group">
+                                                    <div className="font-bold text-xs mb-1 opacity-70 flex items-center gap-1"><i className="fa-solid fa-check-double"></i> 完工回報</div>
+                                                    {task.submissionNote && <div className="mb-2 text-slate-700">{task.submissionNote}</div>}
+                                                    <div className="flex gap-3">
+                                                        {task.submissionLink && <a href={task.submissionLink} target="_blank" className="text-blue-600 hover:underline text-xs flex items-center gap-1"><i className="fa-solid fa-link"></i> 相關連結</a>}
+                                                        {task.submissionFileUrl && <a href={task.submissionFileUrl} target="_blank" className="text-green-700 hover:underline text-xs flex items-center gap-1"><i className="fa-solid fa-file-arrow-down"></i> 回報附件</a>}
                                                     </div>
                                                 </div>
                                             )}
                                         </div>
                                     </div>
                                     {user.role === 'admin' && (
-                                        <button onClick={()=>deleteTask(task.id)} className="text-slate-300 hover:text-red-500 p-2"><i className="fa-solid fa-trash"></i></button>
+                                        <button onClick={()=>deleteTask(task.id)} className="text-slate-300 hover:text-red-500 p-2 transition-colors rounded-full hover:bg-slate-100"><i className="fa-solid fa-trash"></i></button>
                                     )}
                                 </div>
                             );
                         })}
                         
-                        {tasks.length === 0 && !loading && <div className="text-center py-10 text-slate-400 border-2 border-dashed rounded-xl">目前沒有任務</div>}
+                        {tasks.length === 0 && !loading && (
+                            <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
+                                <i className="fa-solid fa-clipboard-check text-4xl mb-3 text-slate-300"></i>
+                                <p>目前沒有待辦任務</p>
+                            </div>
+                        )}
                     </div>
 
                     {/* 回報視窗 Modal */}
                     {submittingTask && (
-                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 relative">
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-fade-in">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 relative overflow-hidden">
                                 {uploading && (
-                                    <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10 flex-col">
-                                        <i className="fa-solid fa-spinner fa-spin text-3xl text-blue-600 mb-2"></i>
-                                        <p className="font-bold text-slate-600">上傳檔案中...</p>
+                                    <div className="absolute inset-0 bg-white/90 flex items-center justify-center z-10 flex-col">
+                                        <i className="fa-solid fa-spinner fa-spin text-4xl text-green-600 mb-3"></i>
+                                        <p className="font-bold text-slate-600">資料上傳中...</p>
                                     </div>
                                 )}
-                                <h3 className="font-bold text-lg mb-4">完成任務回報</h3>
-                                <p className="text-slate-600 mb-2 font-bold">{submittingTask.title}</p>
+                                <h3 className="font-bold text-xl mb-4 text-slate-800 flex items-center gap-2">
+                                    <i className="fa-solid fa-check-circle text-green-500"></i> 完成任務
+                                </h3>
+                                <p className="text-slate-600 mb-4 bg-slate-50 p-2 rounded border border-slate-100 text-sm">{submittingTask.title}</p>
                                 
-                                <label className="text-xs text-slate-500">備註說明</label>
-                                <textarea className="w-full border rounded p-2 h-20 mb-2" placeholder="備註執行狀況..." value={submitData.note} onChange={e=>setSubmitData({...submitData, note:e.target.value})}></textarea>
-                                
-                                <label className="text-xs text-slate-500">外部連結 (Google Drive 等)</label>
-                                <input className="w-full border rounded p-2 mb-2" placeholder="https://..." value={submitData.link} onChange={e=>setSubmitData({...submitData, link:e.target.value})} />
-                                
-                                <label className="text-xs text-slate-500">或上傳附件 (圖片/文件, Max 2MB)</label>
-                                <input type="file" className="w-full border rounded p-2 mb-4 text-sm" onChange={handleFileChange} />
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 mb-1 block">備註說明</label>
+                                        <textarea className="w-full border rounded-lg p-3 h-20 text-sm focus:ring-2 ring-green-500 outline-none" placeholder="輸入執行狀況..." value={submitData.note} onChange={e=>setSubmitData({...submitData, note:e.target.value})}></textarea>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 mb-1 block">外部連結 (如 Google Drive)</label>
+                                        <div className="flex items-center border rounded-lg px-3 bg-white focus-within:ring-2 ring-green-500">
+                                            <i className="fa-solid fa-link text-slate-400 text-xs"></i>
+                                            <input className="w-full p-2 text-sm outline-none" placeholder="https://..." value={submitData.link} onChange={e=>setSubmitData({...submitData, link:e.target.value})} />
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 mb-1 block">上傳附件 (圖片/文件, Max 2MB)</label>
+                                        <input type="file" className="w-full border rounded-lg p-2 text-xs bg-slate-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100" onChange={handleCompletionFile} />
+                                    </div>
+                                </div>
 
-                                <div className="flex gap-2">
-                                    <button onClick={()=>{setSubmittingTask(null); setSubmitData({note:'',link:'',file:null,fileName:''})}} className="flex-1 py-2 text-slate-500 bg-slate-100 rounded">取消</button>
-                                    <button onClick={submitCompletion} className="flex-1 py-2 text-white bg-blue-600 rounded font-bold">確認完成</button>
+                                <div className="flex gap-3 mt-6">
+                                    <button onClick={()=>{setSubmittingTask(null); setSubmitData({note:'',link:'',file:null,fileName:''})}} className="flex-1 py-2.5 text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 font-medium transition-colors">取消</button>
+                                    <button onClick={submitCompletion} className="flex-1 py-2.5 text-white bg-green-600 rounded-lg font-bold hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">確認完成</button>
                                 </div>
                             </div>
                         </div>
@@ -327,5 +414,9 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
+    <style>
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fade-in { animation: fade-in 0.2s ease-out; }
+    </style>
 </body>
 </html>
